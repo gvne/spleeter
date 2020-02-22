@@ -46,7 +46,10 @@ _SPLIT = 'test'
 _MIXTURE = 'mixture.wav'
 _AUDIO_DIRECTORY = 'audio'
 _METRICS_DIRECTORY = 'metrics'
-_INSTRUMENTS = ('vocals', 'drums', 'bass', 'other')
+_INSTRUMENTS = {
+    "2stems": ('vocals', 'accompaniment'),
+    "4stems": ('vocals', 'drums', 'bass', 'other')
+}
 _METRICS = ('SDR', 'SAR', 'SIR', 'ISR')
 
 
@@ -64,13 +67,14 @@ def _separate_evaluation_dataset(arguments, musdb_root_directory, params):
     audio_output_directory = join(
         arguments.output_path,
         _AUDIO_DIRECTORY)
+
     separate_entrypoint(
         Namespace(
             audio_adapter=arguments.audio_adapter,
             configuration=arguments.configuration,
             inputs=mixtures,
             output_path=join(audio_output_directory, _SPLIT),
-            filename_format='{filename}/{instrument}.{codec}',
+            filename_format='{dirname}/{instrument}.{codec}',
             codec='wav',
             duration=600.,
             offset=0.,
@@ -107,21 +111,22 @@ def _compute_musdb_metrics(
     return metrics_output_directory
 
 
-def _compile_metrics(metrics_output_directory):
+def _compile_metrics(metrics_output_directory, instruments):
     """ Compiles metrics from given directory and returns
     results as dict.
 
     :param metrics_output_directory: Directory to get metrics from.
+    :param instruments: The name of the instruments to evaluate
     :returns: Compiled metrics as dict.
     """
     songs = glob(join(metrics_output_directory, 'test/*.json'))
     index = pd.MultiIndex.from_tuples(
-        product(_INSTRUMENTS, _METRICS),
+        product(instruments, _METRICS),
         names=['instrument', 'metric'])
     pd.DataFrame([], index=['config1', 'config2'], columns=index)
     metrics = {
         instrument: {k: [] for k in _METRICS}
-        for instrument in _INSTRUMENTS}
+        for instrument in instruments}
     for song in songs:
         with open(song, 'r') as stream:
             data = json.load(stream)
@@ -146,6 +151,9 @@ def entrypoint(arguments, params):
     musdb_root_directory = arguments.mus_dir
     if not exists(musdb_root_directory):
         raise IOError(f'musdb directory {musdb_root_directory} not found')
+    # Find the extraction type
+    model_type = arguments.configuration.split(':')[-1]  # 2stems/4stems/5stems
+    instruments = _INSTRUMENTS[model_type]
     # Separate musdb sources.
     audio_output_directory = _separate_evaluation_dataset(
         arguments,
@@ -157,7 +165,7 @@ def entrypoint(arguments, params):
         musdb_root_directory,
         audio_output_directory)
     # Compute and pretty print median metrics.
-    metrics = _compile_metrics(metrics_output_directory)
+    metrics = _compile_metrics(metrics_output_directory, instruments)
     for instrument, metric in metrics.items():
         get_logger().info('%s:', instrument)
         for metric, value in metric.items():
